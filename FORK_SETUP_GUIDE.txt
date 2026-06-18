@@ -1,0 +1,283 @@
+Face Attendance Student Track - Fork Setup Guide
+
+Use this guide when someone forks/clones this project from GitHub and wants to run it on their own system.
+
+1. Required Software
+
+- Node.js 20 or newer
+- npm
+- Python 3.10 or newer
+- MongoDB Atlas account or local MongoDB
+- Git
+
+2. Clone The Project
+
+Run:
+
+git clone <your-github-repo-url>
+cd face-attendance-student-track
+
+3. Backend Setup
+
+Go to the backend folder:
+
+cd backend
+
+Install backend dependencies:
+
+npm install
+
+Create a backend .env file:
+
+copy .env.example .env
+
+Open backend/.env and update these values:
+
+PORT=5000
+MONGO_URI=your_mongodb_connection_string
+JWT_SECRET=use_a_long_random_secret_of_at_least_32_characters
+JWT_EXPIRES_IN=12h
+CORS_ORIGINS=http://localhost:3000
+FACE_SERVICE_URL=http://127.0.0.1:8000
+ALLOW_DEFAULT_ADMIN=false
+DEFAULT_ADMIN_USERNAME=admin
+DEFAULT_ADMIN_PASSWORD=change_this_password
+PROVISION_ADMIN_USERNAME=admin
+PROVISION_ADMIN_PASSWORD=change_this_password
+PROVISION_ADMIN_NAME=Institute Admin
+GROQ_API_KEY=your_groq_api_key_here
+
+Important:
+
+- Do not push backend/.env to GitHub.
+- Each person must create their own MongoDB URI.
+- Each person must create their own GROQ_API_KEY if they want the AI resume-check feature.
+- JWT_SECRET must be long and private.
+
+Create or update the admin account:
+
+npm run provision-admin
+
+Start the backend:
+
+npm.cmd start
+
+Backend URL:
+
+http://localhost:5000
+
+Backend health check:
+
+http://localhost:5000/api/health
+
+4. Frontend Setup
+
+Open a new terminal and go to the frontend folder:
+
+cd frontend
+
+Install frontend dependencies:
+
+npm install
+
+Optional: create frontend/.env only if you want custom API URLs:
+
+REACT_APP_API_BASE_URL=http://localhost:5000/api
+REACT_APP_FLASK_BASE_URL=http://localhost:8000
+
+Start the frontend:
+
+npm start
+
+Frontend URL:
+
+http://localhost:3000
+
+If React says port 3000 is already running, stop the old frontend process or allow React to use another port.
+Recommended for this project: keep frontend on port 3000 because backend CORS is configured for http://localhost:3000.
+
+5. Face Recognition Service Setup
+
+Open a new terminal and go to the face_recognition folder:
+
+cd face_recognition
+
+Create and activate a Python virtual environment:
+
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+
+If PowerShell blocks activation, run:
+
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+.venv\Scripts\Activate.ps1
+
+Install Python dependencies:
+
+pip install flask flask-cors opencv-contrib-python numpy
+
+Optional: create face_recognition/.env from the example:
+
+copy .env.example .env
+
+Start the face recognition service:
+
+python app.py
+
+Face service URL:
+
+http://localhost:8000
+
+Note:
+
+- Face login is currently paused in the frontend login flow.
+- Face registration and verification files are still present and can be resumed later.
+
+6. Running The Full Project
+
+Use three terminals:
+
+Terminal 1 - Backend:
+
+cd backend
+npm.cmd start
+
+Terminal 2 - Frontend:
+
+cd frontend
+npm start
+
+Terminal 3 - Face Recognition:
+
+cd face_recognition
+.venv\Scripts\Activate.ps1
+python app.py
+
+7. Default Login Information
+
+Admin:
+
+Username: value from PROVISION_ADMIN_USERNAME
+Password: value from PROVISION_ADMIN_PASSWORD
+
+Student:
+
+Students are usually created from Excel upload.
+Default student password is the student's roll number.
+
+Teacher:
+
+Teachers are usually created from Excel upload.
+Teacher username and password come from the Excel file.
+
+8. Excel Upload Notes
+
+The admin uploads the Excel file from the admin dashboard.
+The Excel data creates or updates teachers and students.
+If an existing student has no assigned teacher, uploading Excel can assign the new teacher from the Excel row.
+
+9. Internship Proof Feature
+
+The student uploads a screenshot proof while applying for an internship.
+The backend uses OCR to extract text from the screenshot.
+The proof is accepted only when the internship URL or ID matches and the screenshot contains a successful submission message.
+
+Required backend dependency:
+
+tesseract.js
+
+10. Resume Check Feature
+
+The student uploads a resume PDF and pastes a job description.
+The backend extracts text from the PDF.
+If GROQ_API_KEY is configured, Groq generates and verifies ATS suggestions.
+If GROQ_API_KEY is missing or Groq fails, the project falls back to local keyword matching.
+
+Required backend dependencies:
+
+pdf-parse
+groq-sdk
+
+11. Common Problems
+
+Problem: EADDRINUSE on port 5000
+
+Meaning: backend is already running on port 5000.
+
+Fix:
+
+netstat -ano | findstr :5000
+Stop-Process -Id <process_id>
+npm.cmd start
+
+Problem: React asks to run on port 3001
+
+Meaning: frontend is already running on port 3000.
+
+Fix:
+
+netstat -ano | findstr :3000
+Stop-Process -Id <process_id>
+npm start
+
+Problem: Invalid username or password
+
+Check:
+
+- Are you using the correct portal: admin, teacher, or student?
+- Is backend connected to the correct MongoDB database?
+- Did you run npm run provision-admin?
+- For students, is the password the roll number?
+
+Problem: Resume check fails
+
+Check:
+
+- Is the uploaded file a PDF?
+- Is the PDF text-based and readable?
+- Is GROQ_API_KEY configured correctly if using AI suggestions?
+
+Problem: Face service error
+
+Check:
+
+- Is the face_recognition Python service running on port 8000?
+- Is opencv-contrib-python installed?
+- Is FACE_SERVICE_URL set to http://127.0.0.1:8000 in backend/.env?
+
+12. Files That Should Not Be Committed
+
+Do not commit:
+
+backend/.env
+frontend/.env
+face_recognition/.env
+node_modules/
+.venv/
+uploads/
+logs/
+
+13. Quick Start Command Summary
+
+Backend:
+
+cd backend
+npm install
+copy .env.example .env
+npm run provision-admin
+npm.cmd start
+
+Frontend:
+
+cd frontend
+npm install
+npm start
+
+Face Recognition:
+
+cd face_recognition
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install flask flask-cors opencv-contrib-python numpy
+python app.py
+

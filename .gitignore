@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+admin_token.txt
+
+# Logs and runtime output
+logs/
+*.log
+error.log
+error.txt
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build output
+dist/
+build/
+.next/
+
+# Python/runtime artifacts
+.venv/
+__pycache__/
+*.py[cod]
+
+# Uploads and local generated data
+uploads/
+backend/uploads/
+frontend/uploads/
+face_recognition/*.db
+face_recognition/*.pkl
+face_recognition/*.log
+face_recognition/registered_faces/
+
+# Accidental scratch files
+backend/models/* extra text*
+backend/models/WeekTarget let me create*
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

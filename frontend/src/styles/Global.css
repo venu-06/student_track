@@ -1,0 +1,83 @@
+:root {
+  --font-sans: "Trebuchet MS", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-serif: Cambria, Georgia, "Times New Roman", serif;
+  --color-bg: #f5efe5;
+  --color-surface: rgba(255, 249, 241, 0.88);
+  --color-surface-strong: #fffdf8;
+  --color-surface-muted: rgba(255, 255, 255, 0.58);
+  --color-border: rgba(90, 74, 59, 0.15);
+  --color-border-strong: rgba(90, 74, 59, 0.3);
+  --color-text: #1d2430;
+  --color-text-muted: #63584b;
+  --color-primary: #17414f;
+  --color-primary-strong: #0d2630;
+  --color-secondary: #9b4d36;
+  --color-accent: #d88a37;
+  --color-accent-soft: rgba(216, 138, 55, 0.16);
+  --color-success: #1f6a52;
+  --color-success-soft: #eaf5f0;
+  --color-danger: #aa4d43;
+  --color-danger-soft: #f9ece9;
+  --color-warning: #a86e14;
+  --color-warning-soft: #fdf4df;
+  --shadow-soft: 0 24px 55px rgba(38, 26, 17, 0.1);
+  --shadow-card: 0 18px 38px rgba(30, 24, 19, 0.12);
+  --radius-xl: 32px;
+  --radius-lg: 24px;
+  --radius-md: 18px;
+  --radius-sm: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background:
+    radial-gradient(circle at top left, rgba(216, 138, 55, 0.2), transparent 24%),
+    radial-gradient(circle at 85% 14%, rgba(23, 65, 79, 0.18), transparent 20%),
+    linear-gradient(140deg, #fbf5ec 0%, #f3ebdf 46%, #ece5dc 100%);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  position: relative;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.35), transparent 80%);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(216, 138, 55, 0.25);
+}
