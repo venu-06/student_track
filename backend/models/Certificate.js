@@ -6,6 +6,9 @@ const schema = new mongoose.Schema({
   purpose: { type: String, default: "" },
   fileName: { type: String, default: "" },
   originalName: { type: String, default: "" },
+  storageProvider: { type: String, enum: ["local", "cloudinary"], default: "local" },
+  cloudinaryPublicId: { type: String, default: "" },
+  cloudinaryResourceType: { type: String, default: "" },
   createdAt: { type: Date, default: Date.now }
 });
 

@@ -9,6 +9,7 @@ import TeacherStudentMap from "../models/TeacherStudentMap.js";
 import User from "../models/User.js";
 import AttendanceSession from "../models/AttendanceSession.js";
 import { writeAuditLog } from "../middleware/audit.js";
+import { deleteCloudinaryFile, uploadFileToCloudinary } from "../utils/cloudinary.js";
 import { createWorker } from "tesseract.js";
 import { PDFParse } from "pdf-parse";
 import fs from "fs";
@@ -614,13 +615,25 @@ export const uploadCertificate = async (req, res) => {
     const count = await Certificate.countDocuments({ student: req.user._id });
     if (count >= 20) return res.status(400).json({ error: "Certificate limit reached (Max 20)" });
 
+    const cloudinaryFile = await uploadFileToCloudinary(req.file.path, {
+      folder: "student_track/certificates",
+      resourceType: "auto"
+    });
+
     const cert = await Certificate.create({
       student: req.user._id,
       title: purpose || req.body.title || req.file.originalname,
       purpose,
-      fileName: `/uploads/${req.file.filename}`,
-      originalName: req.file.originalname
+      fileName: cloudinaryFile?.url || `/uploads/${req.file.filename}`,
+      originalName: req.file.originalname,
+      storageProvider: cloudinaryFile ? "cloudinary" : "local",
+      cloudinaryPublicId: cloudinaryFile?.publicId || "",
+      cloudinaryResourceType: cloudinaryFile?.resourceType || ""
     });
+
+    if (cloudinaryFile && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
 
     writeAuditLog({ req, action: "STUDENT_UPLOAD_CERTIFICATE", details: { fileName: req.file.originalname, purpose } });
     res.json({ message: "Certificate uploaded", certificate: cert });
@@ -644,7 +657,9 @@ export const deleteCertificate = async (req, res) => {
     const cert = await Certificate.findOne({ _id: req.params.id, student: req.user._id });
     if (!cert) return res.status(404).json({ error: "Document not found" });
 
-    if (cert.fileName) {
+    if (cert.cloudinaryPublicId) {
+      await deleteCloudinaryFile(cert.cloudinaryPublicId, cert.cloudinaryResourceType || "image");
+    } else if (cert.fileName && !/^https?:\/\//i.test(cert.fileName)) {
       const relativePath = cert.fileName.replace(/^\/+/, "").replace(/\//g, path.sep);
       const filePath = path.join(process.cwd(), relativePath);
       if (fs.existsSync(filePath)) {

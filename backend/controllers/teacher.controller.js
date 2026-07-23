@@ -9,6 +9,7 @@ import StudentTarget from "../models/StudentTarget.js";
 import User from "../models/User.js";
 import AttendanceSession from "../models/AttendanceSession.js";
 import { writeAuditLog } from "../middleware/audit.js";
+import { uploadFileToCloudinary } from "../utils/cloudinary.js";
 import mongoose from "mongoose";
 import xlsx from "xlsx";
 import fs from "fs";
@@ -433,10 +434,22 @@ export const sendReport = async (req, res) => {
     const filepath = path.join(uploadsDir, filename);
     xlsx.writeFile(wb, filepath);
 
+    const cloudinaryFile = await uploadFileToCloudinary(filepath, {
+      folder: "student_track/reports",
+      resourceType: "raw"
+    });
+
     const report = await ReportModel.create({
       teacher: req.user._id,
-      content: `/uploads/reports/${filename}`
+      content: cloudinaryFile?.url || `/uploads/reports/${filename}`,
+      storageProvider: cloudinaryFile ? "cloudinary" : "local",
+      cloudinaryPublicId: cloudinaryFile?.publicId || "",
+      cloudinaryResourceType: cloudinaryFile?.resourceType || ""
     });
+
+    if (cloudinaryFile && fs.existsSync(filepath)) {
+      fs.unlinkSync(filepath);
+    }
 
     res.json({ message: "Report generated and sent to admin", report });
   } catch (err) {

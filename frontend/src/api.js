@@ -7,11 +7,12 @@ export const FLASK_BASE_URL = process.env.REACT_APP_FLASK_BASE_URL || "http://lo
 
 const API = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000
+  timeout: Number(process.env.REACT_APP_API_TIMEOUT_MS || 60000)
 });
 
 export const buildBackendUrl = (path = "") => {
   if (!path) return BACKEND_BASE_URL;
+  if (/^https?:\/\//i.test(path)) return path;
   return `${BACKEND_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 };
 

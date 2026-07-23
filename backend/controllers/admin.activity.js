@@ -1,5 +1,6 @@
 import ReportModel from "../models/Report.js";
 import User from "../models/User.js";
+import { deleteCloudinaryFile } from "../utils/cloudinary.js";
 import fs from "fs";
 import path from "path";
 
@@ -30,10 +31,14 @@ export const deleteReport = async (req, res) => {
             return res.status(404).json({ error: "Report not found" });
         }
 
-        // Try to delete the file
-        if (report.content) {
+        if (report.cloudinaryPublicId) {
             try {
-                // If content is something like /uploads/reports/Report_id_timestamp.xlsx
+                await deleteCloudinaryFile(report.cloudinaryPublicId, report.cloudinaryResourceType || "raw");
+            } catch (cloudinaryErr) {
+                console.error("Error deleting report file from Cloudinary:", cloudinaryErr);
+            }
+        } else if (report.content && !/^https?:\/\//i.test(report.content)) {
+            try {
                 const relativePath = report.content.startsWith('/') ? report.content.substring(1) : report.content;
                 const absolutePath = path.join(process.cwd(), relativePath);
                 if (fs.existsSync(absolutePath)) {
@@ -43,7 +48,6 @@ export const deleteReport = async (req, res) => {
                 console.error("Error deleting report file from filesystem:", fsErr);
             }
         }
-
         await ReportModel.findByIdAndDelete(req.params.id);
         res.json({ message: "Report deleted successfully" });
     } catch (err) {
