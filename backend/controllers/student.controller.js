@@ -76,7 +76,7 @@ OCR text:
 Strict decision rules:
 1. Return verified=true only if the OCR text context clearly means the student has already submitted/applied/registered successfully for the internship/application.
 2. Do not verify if the text is only an internship detail page, login page, form page, draft, incomplete application, failure, or unrelated text.
-3. If proof type is webpage, it must be connected through the matched URL or ID above.
+3. If proof type is webpage, it must be connected through the matched URL, job ID, same company/role context, or a redirected ATS page such as Workday.
 4. If proof type is email, it may not contain the URL, but it must clearly mention the same company, role, job ID, or internship context.
 5. Do not verify generic job alerts, promotional emails, interview notices, or unrelated emails.
 6. Be conservative. If unsure, return verified=false.
@@ -85,18 +85,23 @@ Return only JSON:
 {"verified":true_or_false,"reason":"short reason"}
 `;
 
-  const response = await groq.chat.completions.create({
-    model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
-    temperature: 0,
-    messages: [{ role: "user", content: prompt }]
-  });
+  try {
+    const response = await groq.chat.completions.create({
+      model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+      temperature: 0,
+      messages: [{ role: "user", content: prompt }]
+    });
 
-  const parsed = extractJsonObject(getGroqMessageContent(response));
-  if (!parsed || typeof parsed.verified !== "boolean") return null;
-  return {
-    ok: parsed.verified,
-    reason: parsed.reason || (parsed.verified ? "Semantic proof verified" : "Semantic proof rejected")
-  };
+    const parsed = extractJsonObject(getGroqMessageContent(response));
+    if (!parsed || typeof parsed.verified !== "boolean") return null;
+    return {
+      ok: parsed.verified,
+      reason: parsed.reason || (parsed.verified ? "Semantic proof verified" : "Semantic proof rejected")
+    };
+  } catch (error) {
+    console.error("Groq proof semantic verification failed:", error.message);
+    return null;
+  }
 };
 const SUCCESSFUL_SUBMISSION_PATTERNS = [
   /applied successfully/i,
@@ -106,7 +111,9 @@ const SUCCESSFUL_SUBMISSION_PATTERNS = [
   /submission successful/i,
   /application received/i,
   /application status\s*:?\s*application received/i,
+  /status\s*:?\s*application received/i,
   /you applied for this job/i,
+  /you applied for this job on/i,
   /you applied for this role/i,
   /we received your application/i,
   /your application has been received/i,
@@ -197,10 +204,19 @@ const detectProofKind = (extractedText = "") =>
 
 const countIdentityMatches = (normalizedText, identityTokens) =>
   identityTokens.filter((token) => normalizedText.includes(token)).length;
-const extractInternshipIdFromUrl = (url = "") => {
-  const [cleanUrl] = String(url).split(/[?#]/);
-  const match = cleanUrl.match(/(\d+)(?:\/)?$/);
-  return match?.[1] || "";
+const extractInternshipIdsFromUrl = (url = "") => {
+  const [cleanUrl] = decodeURIComponent(String(url)).split(/[?#]/);
+  const ids = new Set();
+
+  for (const match of cleanUrl.matchAll(/[a-z]+[-_\s]?\d+(?:[-_]\d+)?|\d{4,}/gi)) {
+    const value = normalizeProofText(match[0]).replace(/\s+/g, "-");
+    ids.add(value);
+
+    const baseId = value.match(/^([a-z]+-\d+)-\d+$/i)?.[1];
+    if (baseId) ids.add(baseId);
+  }
+
+  return Array.from(ids);
 };
 
 const buildUrlFragments = (url = "") => {
@@ -241,10 +257,18 @@ const verifyInternshipProof = async ({ internship, proofFile }) => {
   const identityTokens = buildInternshipIdentityTokens(internship);
   const proofKind = detectProofKind(extractedText);
   const matchedUrl = urlFragments.some((fragment) => normalizedText.includes(fragment));
-  const matchedId = internshipIds.some((id) => normalizedText.includes(id) || normalizedText.includes(id.replace(/-/g, "")));
+  const compactText = normalizedText.replace(/[^a-z0-9]/g, "");
+  const matchedId = internshipIds.some((id) => {
+    const normalizedId = normalizeProofText(id);
+    const compactId = normalizedId.replace(/[^a-z0-9]/g, "");
+    const spacedId = normalizedId.replace(/[-_]+/g, " ");
+    return normalizedText.includes(normalizedId)
+      || normalizedText.includes(spacedId)
+      || (compactId && compactText.includes(compactId));
+  });
   const identityMatchCount = countIdentityMatches(normalizedText, identityTokens);
   const matchedIdentity = matchedId || identityMatchCount >= 2;
-  const proofMatchesInternship = proofKind === "email" ? matchedIdentity : (matchedUrl || matchedId);
+  const proofMatchesInternship = matchedUrl || matchedId || matchedIdentity;
   const matchedSubmission = SUCCESSFUL_SUBMISSION_PATTERNS.some((pattern) => pattern.test(extractedText));
   const hasNegativeSignal = PROOF_NEGATIVE_PATTERNS.some((pattern) => pattern.test(extractedText));
 
@@ -252,7 +276,7 @@ const verifyInternshipProof = async ({ internship, proofFile }) => {
     return {
       ok: false,
       status: "rejected",
-      reason: proofKind === "email" ? "Email proof does not match this internship company, role, or job ID" : "Proof does not match this internship URL or ID",
+      reason: "Proof does not match this internship URL, job ID, company, or role",
       extractedText,
       matchedUrl,
       matchedId
