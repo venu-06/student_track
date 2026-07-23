@@ -8,7 +8,7 @@ const schema = new mongoose.Schema({
   applicationProof: { type: String, default: "" },
   proofVerificationStatus: {
     type: String,
-    enum: ["not_checked", "verified", "rejected", "error"],
+    enum: ["not_checked", "processing", "verified", "rejected", "error"],
     default: "not_checked"
   },
   proofVerificationReason: { type: String, default: "" },

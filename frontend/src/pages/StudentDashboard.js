@@ -226,10 +226,10 @@ function StudentDashboard() {
       const formData = new FormData();
       formData.append("internshipId", internshipId);
       formData.append("proof", proof);
-      await API.post("/student/internship/apply", formData, {
+      const res = await API.post("/student/internship/apply", formData, {
         headers: { "Content-Type": "multipart/form-data" }
       });
-      window.alert("Application proof verified and submitted!");
+      window.alert(res.data?.message || "Proof submitted. Verification is processing.");
       setInternshipProofs((current) => {
         const next = { ...current };
         delete next[internshipId];
@@ -594,13 +594,15 @@ function StudentDashboard() {
                 const myApplication = myInternships.find((item) => item.internship?._id === internship._id);
                 const deadlineOver = isInternshipExpired(internship);
                 const hasApplied = !deadlineOver && myApplication?.applied;
+                const proofProcessing = myApplication?.proofVerificationStatus === "processing";
                 const proofWasRejected = myApplication?.proofVerificationStatus === "rejected" || myApplication?.proofVerificationStatus === "error";
                 return (
                   <div key={internship._id} className="portal-link-card">
                     <h4>{internship.title}</h4>
                     <p>By: {internship.teacher?.name || "Unknown teacher"}</p>
                     {internship.deadline ? <p>Deadline: {formatDateForDisplay(internship.deadline)}</p> : null}
-                    <p>Status: <strong>{hasApplied ? "Applied" : "Not Applied"}</strong></p>
+                    <p>Status: <strong>{hasApplied ? "Applied" : proofProcessing ? "Verification Processing" : "Not Applied"}</strong></p>
+                    {proofProcessing ? <p>Proof submitted. Please refresh after a short time to see final verification.</p> : null}
                     {!hasApplied && proofWasRejected ? <p>Last proof check: Not verified.</p> : null}
                     {deadlineOver ? <p>The deadline is over.</p> : null}
                     <div className="portal-button-row" style={{ marginTop: 14 }}>
@@ -617,14 +619,14 @@ function StudentDashboard() {
                             className="portal-file"
                             type="file"
                             accept="image/*"
-                            disabled={deadlineOver}
+                            disabled={deadlineOver || proofProcessing}
                             onChange={(event) => setInternshipProofs((current) => ({
                               ...current,
                               [internship._id]: event.target.files[0] || null
                             }))}
                           />
-                          <button type="button" className="portal-button" disabled={deadlineOver} onClick={() => handleApplyInternship(internship._id)}>
-                            {deadlineOver ? "Deadline Over" : "Verify Proof and Apply"}
+                          <button type="button" className="portal-button" disabled={deadlineOver || proofProcessing} onClick={() => handleApplyInternship(internship._id)}>
+                            {deadlineOver ? "Deadline Over" : proofProcessing ? "Verification Processing" : "Submit Proof"}
                           </button>
                         </>
                       )}

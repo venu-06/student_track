@@ -148,6 +148,48 @@ const verifyInternshipProof = async ({ internship, proofFile }) => {
   };
 };
 
+const runInternshipProofVerification = async ({ statusId, proofFilePath, removeLocalProof = false }) => {
+  try {
+    const status = await InternshipStatus.findById(statusId).populate("internship");
+    if (!status || !status.internship) return;
+
+    const verification = await verifyInternshipProof({
+      internship: status.internship,
+      proofFile: { path: proofFilePath }
+    });
+
+    status.proofVerificationStatus = verification.status;
+    status.proofVerificationReason = verification.reason;
+    status.proofExtractedText = (verification.extractedText || "").slice(0, 5000);
+    status.proofMatchedUrl = verification.matchedUrl;
+    status.proofMatchedId = verification.matchedId;
+    status.proofCheckedAt = new Date();
+
+    if (verification.ok) {
+      status.applied = true;
+      status.appliedAt = new Date();
+    } else {
+      status.applied = false;
+      status.appliedAt = null;
+      status.shortlisted = "pending";
+    }
+
+    await status.save();
+  } catch (error) {
+    await InternshipStatus.findByIdAndUpdate(statusId, {
+      applied: false,
+      appliedAt: null,
+      shortlisted: "pending",
+      proofVerificationStatus: "error",
+      proofVerificationReason: "Could not read screenshot proof",
+      proofCheckedAt: new Date()
+    });
+  } finally {
+    if (removeLocalProof && proofFilePath && fs.existsSync(proofFilePath)) {
+      fs.unlinkSync(proofFilePath);
+    }
+  }
+};
 const normalizeResumeText = (value = "") =>
   String(value)
     .toLowerCase()
@@ -401,7 +443,9 @@ export const viewInternships = async (req, res) => {
 export const applyInternship = async (req, res) => {
   try {
     const { internshipId } = req.body;
-    const proofImage = req.file ? `/uploads/${req.file.filename}` : "";
+    if (!req.file) {
+      return res.status(400).json({ error: "Screenshot proof is required" });
+    }
 
     const status = await InternshipStatus.findOne({
       internship: internshipId,
@@ -415,41 +459,32 @@ export const applyInternship = async (req, res) => {
       return res.status(400).json({ error: "The internship deadline is over. Application status is Not Applied." });
     }
 
-    let verification;
-    try {
-      verification = await verifyInternshipProof({ internship: status.internship, proofFile: req.file });
-    } catch (error) {
-      status.applied = false;
-      status.appliedAt = null;
-      status.applicationProof = proofImage;
-      status.proofVerificationStatus = "error";
-      status.proofVerificationReason = "Could not read screenshot proof";
-      status.proofCheckedAt = new Date();
-      await status.save();
-      return res.status(400).json({ error: "Could not read screenshot proof. Please upload a clearer image." });
-    }
+    const cloudinaryFile = await uploadFileToCloudinary(req.file.path, {
+      folder: "student_track/internship-proofs",
+      resourceType: "image"
+    });
+    const proofImage = cloudinaryFile?.url || `/uploads/${req.file.filename}`;
 
+    status.applied = false;
+    status.appliedAt = null;
+    status.shortlisted = "pending";
     status.applicationProof = proofImage;
-    status.proofVerificationStatus = verification.status;
-    status.proofVerificationReason = verification.reason;
-    status.proofExtractedText = verification.extractedText.slice(0, 5000);
-    status.proofMatchedUrl = verification.matchedUrl;
-    status.proofMatchedId = verification.matchedId;
-    status.proofCheckedAt = new Date();
-
-    if (!verification.ok) {
-      status.applied = false;
-      status.appliedAt = null;
-      status.shortlisted = "pending";
-      await status.save();
-      return res.status(400).json({ error: "Proof could not be verified. Upload the actual successful submission screenshot." });
-    }
-
-    status.applied = true;
-    status.appliedAt = new Date();
+    status.proofVerificationStatus = "processing";
+    status.proofVerificationReason = "Proof submitted. Verification is processing.";
+    status.proofExtractedText = "";
+    status.proofMatchedUrl = false;
+    status.proofMatchedId = false;
+    status.proofCheckedAt = null;
     await status.save();
 
-    res.json({ message: "Application proof verified and submitted", status });
+    setImmediate(() => {
+      runInternshipProofVerification({ statusId: status._id, proofFilePath: req.file.path, removeLocalProof: Boolean(cloudinaryFile) });
+    });
+
+    res.json({
+      message: "Proof submitted. Verification is processing. Please check status again shortly.",
+      status
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
