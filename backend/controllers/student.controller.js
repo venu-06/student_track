@@ -10,6 +10,8 @@ import User from "../models/User.js";
 import AttendanceSession from "../models/AttendanceSession.js";
 import { writeAuditLog } from "../middleware/audit.js";
 import { deleteCloudinaryFile, uploadFileToCloudinary } from "../utils/cloudinary.js";
+import axios from "axios";
+import FormData from "form-data";
 import { createWorker } from "tesseract.js";
 import { PDFParse } from "pdf-parse";
 import Groq from "groq-sdk";
@@ -18,6 +20,8 @@ import path from "path";
 
 const getTodayDate = () => new Date().toISOString().split("T")[0];
 const TARGET_STATUSES = new Set(["not_started", "ongoing", "completed"]);
+const OCR_SPACE_ENDPOINT = "https://api.ocr.space/parse/image";
+const OCR_SPACE_TIMEOUT_MS = Number(process.env.OCR_SPACE_TIMEOUT_MS || 45000);
 const PROOF_CONTEXT_KEYWORDS = [
   "apply", "applied", "application", "submit", "submitted", "submission", "register", "registered", "registration",
   "success", "successful", "successfully", "complete", "completed", "confirmation", "confirmed", "received",
@@ -228,7 +232,41 @@ const buildUrlFragments = (url = "") => {
   return Array.from(new Set([normalizedUrl, withoutProtocol, withoutWww].filter(Boolean)));
 };
 
-const readImageText = async (filePath) => {
+const readImageTextWithOcrSpace = async (filePath) => {
+  if (!process.env.OCR_SPACE_API_KEY) return "";
+
+  const form = new FormData();
+  form.append("file", fs.createReadStream(filePath));
+  form.append("language", "eng");
+  form.append("isOverlayRequired", "false");
+  form.append("detectOrientation", "true");
+  form.append("scale", "true");
+  form.append("OCREngine", "2");
+
+  const response = await axios.post(OCR_SPACE_ENDPOINT, form, {
+    timeout: OCR_SPACE_TIMEOUT_MS,
+    headers: {
+      ...form.getHeaders(),
+      apikey: process.env.OCR_SPACE_API_KEY
+    },
+    maxBodyLength: Infinity,
+    maxContentLength: Infinity
+  });
+
+  if (response.data?.IsErroredOnProcessing) {
+    const message = Array.isArray(response.data?.ErrorMessage)
+      ? response.data.ErrorMessage.join(", ")
+      : response.data?.ErrorMessage;
+    throw new Error(message || "OCR.space could not process the image");
+  }
+
+  return response.data?.ParsedResults
+    ?.map((result) => result?.ParsedText || "")
+    .join("\n")
+    .trim() || "";
+};
+
+const readImageTextWithTesseract = async (filePath) => {
   const worker = await createWorker("eng");
   try {
     const result = await worker.recognize(filePath);
@@ -236,6 +274,17 @@ const readImageText = async (filePath) => {
   } finally {
     await worker.terminate();
   }
+};
+
+const readImageText = async (filePath) => {
+  try {
+    const cloudText = await readImageTextWithOcrSpace(filePath);
+    if (cloudText) return cloudText;
+  } catch (error) {
+    console.error("OCR.space failed, falling back to local OCR:", error.message);
+  }
+
+  return readImageTextWithTesseract(filePath);
 };
 
 const verifyInternshipProof = async ({ internship, proofFile }) => {
@@ -380,6 +429,7 @@ const runInternshipProofVerification = async ({ statusId, proofFilePath, removeL
     }
   }
 };
+
 const normalizeResumeText = (value = "") =>
   String(value)
     .toLowerCase()
