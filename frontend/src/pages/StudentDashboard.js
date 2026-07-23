@@ -594,8 +594,17 @@ function StudentDashboard() {
                 const myApplication = myInternships.find((item) => item.internship?._id === internship._id);
                 const deadlineOver = isInternshipExpired(internship);
                 const hasApplied = !deadlineOver && myApplication?.applied;
-                const proofProcessing = myApplication?.proofVerificationStatus === "processing";
-                const proofWasRejected = myApplication?.proofVerificationStatus === "rejected" || myApplication?.proofVerificationStatus === "error";
+                const proofStatus = myApplication?.proofVerificationStatus || "not_checked";
+                const proofProcessing = proofStatus === "processing";
+                const proofWasRejected = proofStatus === "rejected" || proofStatus === "error";
+                const proofStatusLabel = hasApplied
+                  ? "Verified proof"
+                  : proofProcessing
+                    ? "Verification processing"
+                    : proofWasRejected
+                      ? "Proof not verified"
+                      : "Proof not submitted";
+                const proofStatusTone = hasApplied ? "success" : proofProcessing ? "warning" : proofWasRejected ? "danger" : "neutral";
                 return (
                   <div key={internship._id} className="portal-link-card">
                     <h4>{internship.title}</h4>
@@ -605,6 +614,10 @@ function StudentDashboard() {
                     {proofProcessing ? <p>Proof submitted. Please refresh after a short time to see final verification.</p> : null}
                     {!hasApplied && proofWasRejected ? <p>Last proof check: Not verified.</p> : null}
                     {deadlineOver ? <p>The deadline is over.</p> : null}
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+                      <StatusBadge tone={proofStatusTone}>{proofStatusLabel}</StatusBadge>
+                    </div>
+                    {proofWasRejected ? <p className="portal-panel-note">Upload the correct successful submission screenshot for this internship.</p> : null}
                     <div className="portal-button-row" style={{ marginTop: 14 }}>
                       <a className="portal-link-button" href={internship.url} target="_blank" rel="noreferrer">
                         Visit Internship Page
