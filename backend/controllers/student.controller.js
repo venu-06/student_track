@@ -12,11 +12,92 @@ import { writeAuditLog } from "../middleware/audit.js";
 import { deleteCloudinaryFile, uploadFileToCloudinary } from "../utils/cloudinary.js";
 import { createWorker } from "tesseract.js";
 import { PDFParse } from "pdf-parse";
+import Groq from "groq-sdk";
 import fs from "fs";
 import path from "path";
 
 const getTodayDate = () => new Date().toISOString().split("T")[0];
 const TARGET_STATUSES = new Set(["not_started", "ongoing", "completed"]);
+const PROOF_CONTEXT_KEYWORDS = [
+  "apply", "applied", "application", "submit", "submitted", "submission", "register", "registered", "registration",
+  "success", "successful", "successfully", "complete", "completed", "confirmation", "confirmed", "received",
+  "thank", "thanks", "review", "consideration", "candidate", "internship", "opportunity"
+];
+
+const PROOF_NEGATIVE_PATTERNS = [
+  /not submitted/i,
+  /not applied/i,
+  /application not/i,
+  /submission failed/i,
+  /payment failed/i,
+  /error submitting/i,
+  /try again/i,
+  /draft/i,
+  /incomplete/i
+];
+
+const getGroqClient = () => {
+  if (!process.env.GROQ_API_KEY) return null;
+  return new Groq({ apiKey: process.env.GROQ_API_KEY });
+};
+
+const getGroqMessageContent = (response) => response?.choices?.[0]?.message?.content?.trim() || "";
+
+const extractJsonObject = (value = "") => {
+  const match = String(value).match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
+};
+
+const hasSubmissionContext = (normalizedText) =>
+  PROOF_CONTEXT_KEYWORDS.filter((keyword) => normalizedText.includes(keyword)).length >= 2;
+
+const verifyProofSubmissionSemantically = async ({ internship, extractedText, matchedUrl, matchedId, proofKind, matchedIdentity }) => {
+  const groq = getGroqClient();
+  if (!groq) return null;
+
+  const prompt = `
+You are verifying whether OCR text from a student's screenshot proves successful internship application submission.
+
+Internship title: ${internship?.title || ""}
+Internship URL: ${internship?.url || ""}
+Proof type detected: ${proofKind || "unknown"}
+URL matched by rules: ${matchedUrl ? "yes" : "no"}
+ID matched by rules: ${matchedId ? "yes" : "no"}
+Company/title context matched by rules: ${matchedIdentity ? "yes" : "no"}
+
+OCR text:
+"""${String(extractedText || "").slice(0, 4000)}"""
+
+Strict decision rules:
+1. Return verified=true only if the OCR text context clearly means the student has already submitted/applied/registered successfully for the internship/application.
+2. Do not verify if the text is only an internship detail page, login page, form page, draft, incomplete application, failure, or unrelated text.
+3. If proof type is webpage, it must be connected through the matched URL or ID above.
+4. If proof type is email, it may not contain the URL, but it must clearly mention the same company, role, job ID, or internship context.
+5. Do not verify generic job alerts, promotional emails, interview notices, or unrelated emails.
+6. Be conservative. If unsure, return verified=false.
+
+Return only JSON:
+{"verified":true_or_false,"reason":"short reason"}
+`;
+
+  const response = await groq.chat.completions.create({
+    model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+    temperature: 0,
+    messages: [{ role: "user", content: prompt }]
+  });
+
+  const parsed = extractJsonObject(getGroqMessageContent(response));
+  if (!parsed || typeof parsed.verified !== "boolean") return null;
+  return {
+    ok: parsed.verified,
+    reason: parsed.reason || (parsed.verified ? "Semantic proof verified" : "Semantic proof rejected")
+  };
+};
 const SUCCESSFUL_SUBMISSION_PATTERNS = [
   /applied successfully/i,
   /successfully applied/i,
@@ -24,6 +105,11 @@ const SUCCESSFUL_SUBMISSION_PATTERNS = [
   /submitted successfully/i,
   /submission successful/i,
   /application received/i,
+  /application status\s*:?\s*application received/i,
+  /you applied for this job/i,
+  /you applied for this role/i,
+  /we received your application/i,
+  /your application has been received/i,
   /you have applied/i,
   /you applied/i,
   /registered successfully/i,
@@ -71,6 +157,46 @@ const normalizeProofText = (value = "") =>
     .replace(/\s+/g, " ")
     .trim();
 
+const EMAIL_PROOF_PATTERNS = [
+  /\bfrom\b/i,
+  /\bto\b/i,
+  /\bsubject\b/i,
+  /gmail/i,
+  /inbox/i,
+  /noreply/i,
+  /no-reply/i,
+  /dear\s+/i,
+  /thank you/i,
+  /thanks/i
+];
+
+const splitMeaningfulTokens = (value = "") =>
+  normalizeProofText(value)
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length >= 4 && !["internship", "intern", "application", "apply", "role", "position", "company"].includes(token));
+
+const getUrlHostTokens = (url = "") => {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    const ignored = new Set(["com", "org", "net", "in", "co", "www", "https", "http", "internships", "jobs", "careers", "unstop", "linkedin"]);
+    return host.split(/[.-]/).filter((token) => token.length >= 3 && !ignored.has(token));
+  } catch {
+    return [];
+  }
+};
+
+const buildInternshipIdentityTokens = (internship) => {
+  const titleTokens = splitMeaningfulTokens(internship?.title || "");
+  const descriptionTokens = splitMeaningfulTokens(internship?.description || "").slice(0, 8);
+  const urlTokens = getUrlHostTokens(internship?.url || "");
+  return Array.from(new Set([...titleTokens, ...descriptionTokens, ...urlTokens])).slice(0, 30);
+};
+
+const detectProofKind = (extractedText = "") =>
+  EMAIL_PROOF_PATTERNS.some((pattern) => pattern.test(extractedText)) ? "email" : "webpage";
+
+const countIdentityMatches = (normalizedText, identityTokens) =>
+  identityTokens.filter((token) => normalizedText.includes(token)).length;
 const extractInternshipIdFromUrl = (url = "") => {
   const [cleanUrl] = String(url).split(/[?#]/);
   const match = cleanUrl.match(/(\d+)(?:\/)?$/);
@@ -110,28 +236,68 @@ const verifyInternshipProof = async ({ internship, proofFile }) => {
 
   const extractedText = await readImageText(proofFile.path);
   const normalizedText = normalizeProofText(extractedText);
-  const internshipId = extractInternshipIdFromUrl(internship?.url);
+  const internshipIds = extractInternshipIdsFromUrl(internship?.url);
   const urlFragments = buildUrlFragments(internship?.url);
+  const identityTokens = buildInternshipIdentityTokens(internship);
+  const proofKind = detectProofKind(extractedText);
   const matchedUrl = urlFragments.some((fragment) => normalizedText.includes(fragment));
-  const matchedId = Boolean(internshipId && normalizedText.includes(internshipId));
+  const matchedId = internshipIds.some((id) => normalizedText.includes(id) || normalizedText.includes(id.replace(/-/g, "")));
+  const identityMatchCount = countIdentityMatches(normalizedText, identityTokens);
+  const matchedIdentity = matchedId || identityMatchCount >= 2;
+  const proofMatchesInternship = proofKind === "email" ? matchedIdentity : (matchedUrl || matchedId);
   const matchedSubmission = SUCCESSFUL_SUBMISSION_PATTERNS.some((pattern) => pattern.test(extractedText));
+  const hasNegativeSignal = PROOF_NEGATIVE_PATTERNS.some((pattern) => pattern.test(extractedText));
 
-  if (!(matchedUrl || matchedId)) {
+  if (!proofMatchesInternship) {
     return {
       ok: false,
       status: "rejected",
-      reason: "Proof does not match this internship URL or ID",
+      reason: proofKind === "email" ? "Email proof does not match this internship company, role, or job ID" : "Proof does not match this internship URL or ID",
       extractedText,
       matchedUrl,
       matchedId
     };
   }
 
-  if (!matchedSubmission) {
+  if (hasNegativeSignal) {
     return {
       ok: false,
       status: "rejected",
-      reason: "Proof does not show a successful submission message",
+      reason: "Proof text indicates the application was not successfully submitted",
+      extractedText,
+      matchedUrl,
+      matchedId
+    };
+  }
+
+  if (matchedSubmission) {
+    return {
+      ok: true,
+      status: "verified",
+      reason: "Proof verified by submission phrase",
+      extractedText,
+      matchedUrl,
+      matchedId
+    };
+  }
+
+  if (!hasSubmissionContext(normalizedText)) {
+    return {
+      ok: false,
+      status: "rejected",
+      reason: "Proof does not show enough application submission context",
+      extractedText,
+      matchedUrl,
+      matchedId
+    };
+  }
+
+  const semanticVerification = await verifyProofSubmissionSemantically({ internship, extractedText, matchedUrl, matchedId, proofKind, matchedIdentity });
+  if (semanticVerification?.ok) {
+    return {
+      ok: true,
+      status: "verified",
+      reason: semanticVerification.reason,
       extractedText,
       matchedUrl,
       matchedId
@@ -139,9 +305,9 @@ const verifyInternshipProof = async ({ internship, proofFile }) => {
   }
 
   return {
-    ok: true,
-    status: "verified",
-    reason: "Proof verified",
+    ok: false,
+    status: "rejected",
+    reason: semanticVerification?.reason || "Proof does not clearly show successful application submission",
     extractedText,
     matchedUrl,
     matchedId
