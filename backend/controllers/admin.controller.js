@@ -9,12 +9,13 @@ import Achievement from "../models/Achievement.js";
 import Permission from "../models/Permission.js";
 import Certificate from "../models/Certificate.js";
 import StudentTarget from "../models/StudentTarget.js";
-import { transporter } from "../config/mail.js";
+import { getMailFrom, isMailConfigured, transporter } from "../config/mail.js";
 import { deleteFaceByUsername } from "../utils/faceStore.js";
 import { writeAuditLog } from "../middleware/audit.js";
 import { normalizeAcademicYear, normalizeDepartment } from "../config/normalization.js";
 
-const APP_URL = process.env.FRONTEND_URL || "http://localhost:3000/";
+const APP_URL = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/+$/, "");
+const FACE_REGISTRATION_URL = process.env.FACE_REGISTRATION_URL || `${APP_URL}/face-register`;
 
 const normalizeKey = (key = "") =>
   String(key)
@@ -43,12 +44,16 @@ const sendCredentialsMail = async ({ to, subject, text }) => {
     return { sent: false, reason: "missing_email" };
   }
 
+  if (!isMailConfigured || !transporter) {
+    return { sent: false, reason: "mail_not_configured" };
+  }
+
   try {
-    await transporter.sendMail({ to, subject, text });
+    await transporter.sendMail({ from: getMailFrom(), to, subject, text });
     return { sent: true };
   } catch (error) {
-    console.error(`Failed to send credentials email to ${to}`, error);
-    return { sent: false, reason: "send_failed" };
+    console.error(`Failed to send credentials email to ${to}`, error.message);
+    return { sent: false, reason: error.message || "send_failed" };
   }
 };
 
@@ -138,6 +143,7 @@ export const uploadExcel = async (req, res) => {
     let teacherEmailsFailed = 0;
     let studentEmailsFailed = 0;
     let skippedRows = 0;
+    const emailFailureReasons = [];
 
     for (let row of data) {
       const tName = getRowValue(row, ["teacher name", "teachername", "faculty name", "facultyname"]);
@@ -179,7 +185,7 @@ export const uploadExcel = async (req, res) => {
         const teacherMailResult = await sendCredentialsMail({
           to: tMail,
           subject: "Teacher Login Credentials & Face Registration Link",
-          text: `Welcome to Face Attendance System\n\nUsername: ${tUsername}\nPassword: ${tPassword}\n\nPlease click the face registration link below to login and register your face:\n${APP_URL}`
+          text: `Welcome to Face Attendance System\n\nUsername: ${tUsername}\nPassword: ${tPassword}\n\nPlease click the face registration link below to login and register your face:\n${FACE_REGISTRATION_URL}`
         });
 
         if (teacherMailResult.sent) {
@@ -188,6 +194,7 @@ export const uploadExcel = async (req, res) => {
           teacherEmailsSkipped++;
         } else {
           teacherEmailsFailed++;
+          emailFailureReasons.push({ to: tMail || tUsername, reason: teacherMailResult.reason });
         }
       } else {
         teacher.name = tName || teacher.name;
@@ -223,7 +230,7 @@ export const uploadExcel = async (req, res) => {
           const studentMailResult = await sendCredentialsMail({
             to: sMail,
             subject: "Student Login Credentials & Face Registration Link",
-            text: `Welcome to Face Attendance System\n\nYour account has been created.\nUsername: ${sRollno}\nPassword: ${sRollno}\n\nPlease click the face registration link below to login and complete your face registration:\n${APP_URL}`
+            text: `Welcome to Face Attendance System\n\nYour account has been created.\nUsername: ${sRollno}\nPassword: ${sRollno}\n\nPlease click the face registration link below to login and complete your face registration:\n${FACE_REGISTRATION_URL}`
           });
 
           if (studentMailResult.sent) {
@@ -232,6 +239,7 @@ export const uploadExcel = async (req, res) => {
             studentEmailsSkipped++;
           } else {
             studentEmailsFailed++;
+            emailFailureReasons.push({ to: sMail || sRollno, reason: studentMailResult.reason });
           }
         } else {
           const previousTeacherId = student.assignedTeacher?.toString() || "";
@@ -256,6 +264,8 @@ export const uploadExcel = async (req, res) => {
 
     res.json({
       message: "Excel processed successfully. Login credentials were emailed only for newly created teachers and students.",
+      mailConfigured: isMailConfigured,
+      faceRegistrationUrl: FACE_REGISTRATION_URL,
       teachersCreated,
       studentsCreated,
       studentsReassigned,
@@ -265,7 +275,8 @@ export const uploadExcel = async (req, res) => {
       teacherEmailsSkipped,
       studentEmailsSkipped,
       teacherEmailsFailed,
-      studentEmailsFailed
+      studentEmailsFailed,
+      emailFailureReasons: emailFailureReasons.slice(0, 10)
     });
     writeAuditLog({
       req,

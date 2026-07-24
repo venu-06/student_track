@@ -127,8 +127,14 @@ function AdminDashboard() {
         headers: { "Content-Type": "multipart/form-data" }
       });
 
+      const emailFailureReasons = (res.data.emailFailureReasons || [])
+        .map((item) => `${item.to}: ${item.reason}`)
+        .join("\n");
+
       window.alert(
         `${res.data.message}\n\n` +
+        `Mail configured: ${res.data.mailConfigured ? "Yes" : "No"}\n` +
+        `Face registration link: ${res.data.faceRegistrationUrl || "Not set"}\n\n` +
         `New teachers: ${res.data.teachersCreated || 0}\n` +
         `New students: ${res.data.studentsCreated || 0}\n` +
         `Teacher emails sent: ${res.data.teacherEmailsSent || 0}\n` +
@@ -136,7 +142,8 @@ function AdminDashboard() {
         `Teacher emails skipped: ${res.data.teacherEmailsSkipped || 0}\n` +
         `Student emails skipped: ${res.data.studentEmailsSkipped || 0}\n` +
         `Teacher email failures: ${res.data.teacherEmailsFailed || 0}\n` +
-        `Student email failures: ${res.data.studentEmailsFailed || 0}`
+        `Student email failures: ${res.data.studentEmailsFailed || 0}` +
+        (emailFailureReasons ? `\n\nFailure reasons:\n${emailFailureReasons}` : "")
       );
 
       setFile(null);
