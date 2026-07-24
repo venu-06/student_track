@@ -395,35 +395,49 @@ const verifyInternshipProof = async ({ internship, proofFile }) => {
   };
 };
 
-const runInternshipProofVerification = async ({ statusId, proofFilePath, removeLocalProof = false }) => {
+const runInternshipProofVerification = async ({ statusId, proofFilePath, expectedProof, removeLocalProof = false }) => {
   try {
     const status = await InternshipStatus.findById(statusId).populate("internship");
     if (!status || !status.internship) return;
+    if (status.proofVerificationStatus !== "processing" || status.applicationProof !== expectedProof) return;
 
     const verification = await verifyInternshipProof({
       internship: status.internship,
       proofFile: { path: proofFilePath }
     });
 
-    status.proofVerificationStatus = verification.status;
-    status.proofVerificationReason = verification.reason;
-    status.proofExtractedText = (verification.extractedText || "").slice(0, 5000);
-    status.proofMatchedUrl = verification.matchedUrl;
-    status.proofMatchedId = verification.matchedId;
-    status.proofCheckedAt = new Date();
-
-    if (verification.ok) {
-      status.applied = true;
-      status.appliedAt = new Date();
-    } else {
-      status.applied = false;
-      status.appliedAt = null;
-      status.shortlisted = "pending";
+    const currentStatus = await InternshipStatus.findById(statusId);
+    if (
+      !currentStatus ||
+      currentStatus.proofVerificationStatus !== "processing" ||
+      currentStatus.applicationProof !== expectedProof
+    ) {
+      return;
     }
 
-    await status.save();
+    currentStatus.proofVerificationStatus = verification.status;
+    currentStatus.proofVerificationReason = verification.reason;
+    currentStatus.proofExtractedText = (verification.extractedText || "").slice(0, 5000);
+    currentStatus.proofMatchedUrl = verification.matchedUrl;
+    currentStatus.proofMatchedId = verification.matchedId;
+    currentStatus.proofCheckedAt = new Date();
+
+    if (verification.ok) {
+      currentStatus.applied = true;
+      currentStatus.appliedAt = new Date();
+    } else {
+      currentStatus.applied = false;
+      currentStatus.appliedAt = null;
+      currentStatus.shortlisted = "pending";
+    }
+
+    await currentStatus.save();
   } catch (error) {
-    await InternshipStatus.findByIdAndUpdate(statusId, {
+    await InternshipStatus.findOneAndUpdate({
+      _id: statusId,
+      proofVerificationStatus: "processing",
+      applicationProof: expectedProof
+    }, {
       applied: false,
       appliedAt: null,
       shortlisted: "pending",
@@ -726,7 +740,12 @@ export const applyInternship = async (req, res) => {
     await status.save();
 
     setImmediate(() => {
-      runInternshipProofVerification({ statusId: status._id, proofFilePath: req.file.path, removeLocalProof: Boolean(cloudinaryFile) });
+      runInternshipProofVerification({
+        statusId: status._id,
+        proofFilePath: req.file.path,
+        expectedProof: proofImage,
+        removeLocalProof: Boolean(cloudinaryFile)
+      });
     });
 
     res.json({
@@ -748,6 +767,33 @@ export const updateInternshipAction = async (req, res) => {
     status.shortlisted = shortlistedStatus; // "shortlisted", "not_shortlisted", "pending"
     await status.save();
     res.json({ message: "Status updated", status });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const stopInternshipProofVerification = async (req, res) => {
+  try {
+    const { internshipId } = req.body;
+    const status = await InternshipStatus.findOne({ internship: internshipId, student: req.user._id });
+    if (!status) return res.status(404).json({ error: "Application not found" });
+    if (status.proofVerificationStatus !== "processing") {
+      return res.status(400).json({ error: "No verification is currently processing for this internship" });
+    }
+
+    status.applied = false;
+    status.appliedAt = null;
+    status.applicationProof = "";
+    status.proofVerificationStatus = "not_checked";
+    status.proofVerificationReason = "Verification stopped by student.";
+    status.proofExtractedText = "";
+    status.proofMatchedUrl = false;
+    status.proofMatchedId = false;
+    status.proofCheckedAt = null;
+    status.shortlisted = "pending";
+    await status.save();
+
+    res.json({ message: "Verification stopped. You can upload the correct proof now.", status });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

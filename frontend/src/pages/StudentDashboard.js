@@ -251,6 +251,16 @@ function StudentDashboard() {
     }
   };
 
+  const handleStopInternshipVerification = async (internshipId) => {
+    try {
+      const res = await API.post("/student/internship/stop-verification", { internshipId });
+      window.alert(res.data?.message || "Verification stopped. Upload the correct proof now.");
+      await Promise.all([fetchInternships(), fetchMyInternships()]);
+    } catch (err) {
+      window.alert(getApiErrorMessage(err, "Error stopping verification"));
+    }
+  };
+
   const handleUploadCertificate = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -626,20 +636,24 @@ function StudentDashboard() {
                         <button type="button" className="portal-button-danger" onClick={() => handleWithdrawInternship(internship._id)}>
                           Withdraw
                         </button>
+                      ) : proofProcessing ? (
+                        <button type="button" className="portal-button-danger" onClick={() => handleStopInternshipVerification(internship._id)}>
+                          Stop Verification
+                        </button>
                       ) : (
                         <>
                           <input
                             className="portal-file"
                             type="file"
                             accept="image/*"
-                            disabled={deadlineOver || proofProcessing}
+                            disabled={deadlineOver}
                             onChange={(event) => setInternshipProofs((current) => ({
                               ...current,
                               [internship._id]: event.target.files[0] || null
                             }))}
                           />
-                          <button type="button" className="portal-button" disabled={deadlineOver || proofProcessing} onClick={() => handleApplyInternship(internship._id)}>
-                            {deadlineOver ? "Deadline Over" : proofProcessing ? "Verification Processing" : "Submit Proof"}
+                          <button type="button" className="portal-button" disabled={deadlineOver} onClick={() => handleApplyInternship(internship._id)}>
+                            {deadlineOver ? "Deadline Over" : "Submit Proof"}
                           </button>
                         </>
                       )}

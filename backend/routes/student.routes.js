@@ -7,6 +7,7 @@ import {
   viewInternships,
   applyInternship,
   updateInternshipAction,
+  stopInternshipProofVerification,
   withdrawInternship,
   getMyInternshipStatus,
   getMyTargets,
@@ -38,6 +39,7 @@ router.get("/attendance/summary", getAttendanceSummary);
 router.get("/internships", viewInternships);
 router.post("/internship/apply", imageUpload.single("proof"), applyInternship);
 router.patch("/internship/status", updateInternshipAction); // for shortlisting tracking
+router.post("/internship/stop-verification", stopInternshipProofVerification);
 router.post("/internship/withdraw", withdrawInternship);
 router.get("/my-internships", getMyInternshipStatus);
 
