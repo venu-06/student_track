@@ -21,7 +21,8 @@ import path from "path";
 const getTodayDate = () => new Date().toISOString().split("T")[0];
 const TARGET_STATUSES = new Set(["not_started", "ongoing", "completed"]);
 const OCR_SPACE_ENDPOINT = "https://api.ocr.space/parse/image";
-const OCR_SPACE_TIMEOUT_MS = Number(process.env.OCR_SPACE_TIMEOUT_MS || 45000);
+const OCR_SPACE_TIMEOUT_MS = Number(process.env.OCR_SPACE_TIMEOUT_MS || 15000);
+const OCR_ENABLE_LOCAL_FALLBACK = process.env.OCR_ENABLE_LOCAL_FALLBACK === "true";
 const PROOF_CONTEXT_KEYWORDS = [
   "apply", "applied", "application", "submit", "submitted", "submission", "register", "registered", "registration",
   "success", "successful", "successfully", "complete", "completed", "confirmation", "confirmed", "received",
@@ -277,11 +278,18 @@ const readImageTextWithTesseract = async (filePath) => {
 };
 
 const readImageText = async (filePath) => {
-  try {
-    const cloudText = await readImageTextWithOcrSpace(filePath);
-    if (cloudText) return cloudText;
-  } catch (error) {
-    console.error("OCR.space failed, falling back to local OCR:", error.message);
+  if (process.env.OCR_SPACE_API_KEY) {
+    try {
+      const cloudText = await readImageTextWithOcrSpace(filePath);
+      if (cloudText) return cloudText;
+      throw new Error("OCR.space returned empty text");
+    } catch (error) {
+      console.error("OCR.space failed:", error.message);
+      if (!OCR_ENABLE_LOCAL_FALLBACK) {
+        throw new Error("Cloud OCR could not read screenshot proof. Please retry with a clearer image.");
+      }
+      console.error("Using local OCR fallback because OCR_ENABLE_LOCAL_FALLBACK=true");
+    }
   }
 
   return readImageTextWithTesseract(filePath);
